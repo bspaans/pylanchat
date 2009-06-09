@@ -2,10 +2,10 @@
 
 	Python LAN Chat, Version 1.2
 
-	written by Bart Spaans, 2007, 2008
+	written by Bart Spaans, 2007, 2008, 2009, <onderstekop@gmail.com>
 	http://www.onderstekop.nl/
 	
-	Released under the GNU General Public License (GPL)
+	Released under the GNU General Public License version 3 (GPL)
 	
 ================================================================================
 
@@ -37,6 +37,8 @@ This package contains:
 	TODO
 		+ Preferences tab needs labels..(yikes)
 		+ More options supported in the configuration files
+		+ A setup.py file - not really necessary, but could be nice
+		+ Short license in every file header. Full license in LICENSE.
 
 ================================================================================
 
@@ -85,5 +87,12 @@ Q: How do I setup Python LAN Chat on my own local network?
 	Client directory and run Client.py). 
 	You can also check out some minimal stats by pointing 
 	your browser at	port 8080 of the server.
+
+Q: Is there a public repository available?
+
+	Yes, check github! You can fork the whole project with a 
+	single click. See: http://github.com/bspaans/pylanchat/
+	You can send me a pull request if you have written something
+	that may benefit the original repository. 
 
 ================================================================================
