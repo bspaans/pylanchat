@@ -1,0 +1,86 @@
+===============================================================
+
+	Python LAN Chat, Version 1.2
+
+	written by Bart Spaans, 2007, 2008
+	http://www.onderstekop.nl/
+	
+	Released under the GNU General Public License (GPL)
+	
+================================================================
+
+This package contains:
+	
+	Python LAN Chat Server
+	Python LAN Chat Client
+	Python LAN Chat File Bot
+	Python LAN Chat Log Bot
+	Python LAN Chat Bot Skeleton
+
+================================================================
+
+	VERSION LOG
+
+	Version 1.1
+
+		* Connect to server with chosen alias
+		* Send and receive messages
+		* Send and receive private messages
+
+	Version 1.2
+
+		* RSA encrypted sending and receiving
+		* Multiple channels
+		* Configuration files
+		* Crude emoticon support
+		* Dropped support for the GUI version of the server
+			
+
+================================================================
+
+FREQUENTLY ASKED QUESTIONS
+
+================================================================
+
+Q: I just want to connect to a server and chat, what do I need?
+
+	You will only need to copy the Client directory and 
+	its contents. And run the Client.py file.
+
+Q: How do I run .py files in Windows?
+		
+	Click 'Start', click 'Run', type 'cmd' and hit enter. 
+	A terminal will open. You will need to navigate to the 
+	directory where the .py file is located. For example, 
+	if you want to open C:\python\PLC\Client\Client.py 
+	you will need to type 'cd c:\python\PLC\Client' to enter
+	the directory. Once you there type 'python.exe Client.py' 
+	and the .py should be running
+
+Q: How do I run .py files in Linux?
+
+	Open a terminal, navigate to the directory and run the 
+	.py file by typing ./Client.py (for instance). 
+	On most distros	you could also doubleclick the file 
+	and it will ask you to run it.
+
+Q: I'm running the .py file but I'm getting an error?
+
+	You need to have Python, GTK+, Twisted and the Crypto 
+	library installed to properly run Python LAN Chat. 
+	On a lot of Linux distributions these packages are 
+	installed by default or to be found in the package manager, 
+	but on Windows they aren't. You can see INSTALL.txt for 
+	more details. If you still receive errors, but have these 
+	programs installed create a new issue on the issue tracker.
+
+Q: How do I setup Python LAN Chat on my own local network?
+
+	Pick a PC that will run the server. Copy the server 
+	directory and run pylanchatd. Your channel will now 
+	become available to other computers in your LAN with the 
+	Python LAN Chat client (simply copy the
+	Client directory and run Client.py). 
+	You can also check out some minimal stats by pointing 
+	your browser at	port 8080 of the server.
+

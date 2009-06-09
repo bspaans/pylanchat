@@ -1,0 +1,494 @@
+#!/usr/bin/env python
+import time
+
+# Twisted
+from twisted.internet.protocol import Protocol, Factory
+from twisted.web import server, resource
+from twisted.internet import reactor
+
+# Basic Datastructures and Configuration Parser
+from User import User
+from Users import Users
+from ConfigurationParser import Parser
+
+# Encryption
+from Crypto.PublicKey import RSA
+from os import urandom
+
+APP_NAME = "pylanchatd"
+APP_VERSION = "1.2"
+
+#LOG Variables
+LOG_INFO = 1
+LOG_SEND = 2
+LOG_RECV = 3
+LOG_ERR = 4
+LOG_CONN = 5
+LOG_SERVER = 6
+
+#BROADCAST Message variables
+BROADCAST_EVERYBODY = 1
+BROADCAST_CHAT = 2
+BROADCAST_GAME = 3
+BROADCAST_PM = 4
+
+
+class RPG(Protocol):
+	
+	init = True
+	inGAME = False
+	inCHAT = False
+	encrypted_messages = False
+	encrypted_responses = False
+	protocol = "1.2"
+	channel = ""
+	name = ""
+
+	def connectionMade(self):
+		
+		ID = self.factory.users.addUser()
+		onlineUsers = self.factory.users.numUser
+		registeredUsers = self.factory.users.regUsers()
+
+		IP = self.transport.getPeer()
+		IP = IP.host
+		addText("Established connection UID %d (%s)\n" % (ID, IP), LOG_CONN)
+		print IP, self.factory.blockedip	
+
+		if IP in self.factory.blockedip:
+			self.transport.loseConnection()
+			addText( "Dropped connection with UID " +str(ID) + ". IP %s is blocked." % IP, LOG_ERR)
+			return
+
+		welcome = self.factory.welcome
+		msg = "UID " + str(ID) + " " + str(registeredUsers) + " " + str(onlineUsers) + " " + IP
+		publickey = "PROTOCOL " + self.protocol + "\r\nPUBLIC RSAKEY e " + str(self.factory.publickey['e']) + "\r\nPUBLIC RSAKEY n "+ \
+				str(self.factory.publickey['n']) + "\r\nCHALLENGE " + self.factory.challenge
+
+		firstmsg = welcome + "\r\n\r\n" + publickey + "\r\n" + msg +"\r\n"
+		self.transport.write(firstmsg)
+		
+		addText(firstmsg, LOG_SEND)
+		
+		self.factory.clients.append(self)
+		
+		self.ID = ID
+		
+	def dataReceived(self, data):
+
+		if data == "":
+			return
+
+		data = data.split("\r\n\r\n")
+		if len(data) != 1:
+			for d in data:
+				self.dataReceived(d)
+			return
+		else:
+			data = data[0]
+			
+		if self.init:
+			if data[0:9] == "CHALLENGE":
+				receivedkey = data[10:]
+				if self.factory.challenge_answer == receivedkey:
+					addText("UID %d is using RSA encryption to send messages" % self.ID, LOG_INFO)
+					self.message("PUBLIC KEY RSA CHALLENGE PASSED\r")
+					self.encrypted_messages = True
+				else:
+					addText("UID %d is trying to use RSA encryption, but failed to answer the challenge correctly" % self.ID, LOG_ERR)
+					self.transport.write("PUBLIC KEY RSA CHALLENGE FAILED")
+
+			elif data[0:4] != "USER":
+				addText( "UID" + str(self.ID) + " : " +  data, LOG_RECV)
+				self.transport.loseConnection()
+				addText( "Dropping user UID " +str( self.ID) + " unknown protocol", LOG_ERR)
+			else:
+				addText( "UID" + str(self.ID) + " : " +  data, LOG_RECV)
+				data = data.split("\r\n")
+				data = data[0].split(" ")
+				try:
+					name = data[1]
+					if name == "":
+						self.transport.write("USER Fault"+ "\r\n")
+						addText( "UID" + str(self.ID) + " USER Fault", LOG_ERR)
+					else:
+						if self.factory.users.addName(self.ID, name):
+							self.transport.write("USER OK " + name + "'\r\n")
+							self.name = name
+							addText( "UID" + str(self.ID) + " changed his/her name to "  + name, LOG_SERVER)
+							self.init= False
+						else:
+							addText( "UID" + str(self.ID) + " USER AlreadyExists " + name, LOG_ERR)
+							self.transport.write("USER AlreadyExists " + name + "\r\n")
+							self.transport.loseConnection()
+				except:
+					self.transport.write("USER Fault"+ "\r\n")
+					addText( "UID" + str(self.ID) + " USER Fault")
+				
+		else:
+			if not(self.encrypted_messages):
+				addText( str(self.name) + " : " +  data, LOG_RECV)
+			self.checkCommands(data)
+		
+	def connectionLost(self, reason):
+		self.leave_channel()
+		self.factory.users.remUser(self.ID)
+		ID = self.ID
+		addText("Lost connection with %s because of %s" %(self.name,  str(reason)), LOG_CONN)
+		self.broadcast("EXIT UID " + str(ID))
+		self.factory.clients.remove(self)
+		
+	
+	def checkCommands(self, data, unencrypted = False):
+
+		dataLineSplit = data.split("\r\n")
+		dataLine = dataLineSplit[0]
+		dataSpaceSplit = dataLine.split(" ")
+		command = dataSpaceSplit[0].upper()
+		
+		if command == "QUIT":
+			self.transport.loseConnection()
+		elif command == "USERS":
+			ID =self.ID
+			onlineUsers = self.factory.users.numUser
+			registeredUsers = self.factory.users.regUsers()
+				
+			IP = self.transport.getPeer()
+			IP = IP.host
+			
+			msg = "USERS " + self.name + "UID " + str(ID) + " " + str(registeredUsers) + " " + str(onlineUsers) + " " + IP + "\r\n"
+			self.transport.write(msg)
+			addText( self.name + " " +msg, LOG_SEND)
+		elif command == "USERLIST":
+
+			msg = ""
+			for c in self.factory.clients:
+				if c.inCHAT and c.channel == self.channel:
+					msg += "USERLIST\t" + str( c.ID) +"\t" + c.name + "\t[Online]\t\r\n" 
+			self.transport.write(msg)
+			addText( "%s requested user list\r\n" % self.name, LOG_SEND)
+
+		# New in version 1.2
+		elif command == "CHANNELLIST":
+			msg = ""
+			for channel in self.factory.channels:
+				msg += "CHANNEL %s %d\r\n" % (channel[0], channel[1])
+			self.send_command(msg)
+			addText( "%s requested channel list\r\n" % self.name, LOG_SEND)
+
+
+
+		elif command == "SERV":
+			msg = "SERV\r\nChat: main chat room and private messaging\r\nGame: retreive game maps"
+			self.transport.write(msg + "\r\n\r\n")
+			addText( self.name + " " +msg, LOG_SEND)
+		elif command == "JOIN":
+			try:
+				serv = dataSpaceSplit[1].upper()
+				if serv == "GAME":
+					self.inGAME = True
+					self.transport.write("JOIN GAME OK 20 20")
+					self.broadcast("JOIN GAME UID " + str(self.ID) + " " +self.name, BROADCAST_GAME)
+					addText( self.name + " joined the game", LOG_SERVER)
+				elif serv == "CHAT":
+					self.inCHAT = True
+					self.enter_channel(self.factory.default_channel)
+					self.broadcast("JOIN CHAT UID " + str(self.ID) + " " + self.name + " " + self.channel + "\r\n\r", BROADCAST_CHAT)
+					addText( self.name + " joined the chat", LOG_SERVER)
+				elif serv == "CHANNEL":
+					self.inCHAT = True
+					self.broadcast("EXIT UID %d\r\n\r" % self.ID, BROADCAST_CHAT)
+					self.leave_channel()
+					self.enter_channel(dataSpaceSplit[2])
+					self.broadcast("JOIN CHAT UID " + str(self.ID) + " " + self.name + " " + self.channel + "\r\n\r", BROADCAST_CHAT)
+					addText("%s joined channel %s" % (self.name, self.channel))
+			except:
+				msg = "JOIN Fault ServiceNotKnown '%s'" % serv
+				self.send_command(msg)
+				addText( self.name + " " + msg, LOG_ERR)
+
+		elif command == "PUBLIC":
+			keys = {}
+			for d in dataLineSplit:
+				words = d.split(" ")
+				if d[:15] == "PUBLIC RSAKEY e":
+					keys['e'] = long(words[3])
+				elif d[:15] == "PUBLIC RSAKEY n":
+					keys['n'] = long(words[3])
+				elif d[:11] == "MYCHALLENGE":
+					try:
+						challenge = words[1]
+						self.client_key = RSA.construct((keys['n'], keys['e']))
+						self.send_command("MYCHALLENGE " + self.client_key.encrypt(challenge, "")[0])
+						addText("Answering %s's RSA challenge" % self.name, LOG_INFO)
+					except:
+						addText("Couldn't encrypt %s's RSA challenge" % self.name )
+
+		elif command == "MYCHALLENGE":
+			if dataSpaceSplit[1] == "PASSED":
+				addText("Passed RSA challenge. %s is using RSA to receive messages." % self.name)
+				self.encrypted_responses = True
+			elif dataSpaceSplit[1] == "FAILED":
+				addText("Failed RSA challenge. %s is not using RSA to receive messages." % self.name, LOG_ERR)
+			else:
+				pass
+
+
+		elif command == "MSG":
+			try:
+				serv =dataSpaceSplit[1].upper()
+				msg = dataSpaceSplit[2]
+				
+				if serv == "GAME":
+					if self.inGAME:
+						self.broadcast("MSG GAME UID " + str(self.ID) + " " + msg + "\r\n", BROADCAST_GAME)
+						addText( self.name + " is sending a GAME message: " + msg, LOG_INFO)
+					else:
+						self.transport.write("MSG Fault NotInGame\r\n")
+						addText( self.name + " tried to send a GAME message but wasn't in a GAME", LOG_ERR) 
+				elif serv == "CHAT":
+					if self.inCHAT:
+						self.broadcast_command("MSG CHAT UID " + str(self.ID) + " " + msg)
+						addText( self.name + " is sending a CHAT message: " + msg, LOG_INFO)
+					else:
+						self.transport.write("MSG Fault NotInChat\r\n")	
+						addText( self.name + " tried to send a CHAT message but wasn't in a CHAT", LOG_ERR)
+				elif serv == "PM":
+					addText( "PM message..", LOG_INFO)
+					if self.inCHAT:
+						to = dataSpaceSplit[2]
+						msg =  dataSpaceSplit[3]
+						self.message("MSG PM " + self.name + " " + to + " " + msg)
+						self.broadcast("MSG PM " + self.name + " "+ to + " " + msg, BROADCAST_PM, to)
+			except:
+				self.transport.write("MSG Fault ServiceNotKnown\r\n")	
+				addText( self.name + " tried to send a message to unknown service (" + serv + ")", LOG_ERR)
+		else:
+			if self.encrypted_messages and not(unencrypted):
+				addText( "Decrypting data received from %s" % self.name)
+				realdata = self.get_decrypted_msg(data)
+				if self.checkCommands(realdata, True) != False:
+					return True
+			msg = "FAULT Unknown command " +  command 
+			self.transport.write(msg + "\r\n")
+			addText( self.name + " " +msg, LOG_SEND)
+			return False
+
+	def enter_channel(self, channel):
+		for x in self.factory.channels:
+			if x[0] == channel:
+				x[1] += 1
+				self.channel = channel
+
+	def leave_channel(self):
+		for x in self.factory.channels:
+			if x[0] == self.channel:
+				x[1] -= 1
+				self.channel = ""
+
+	def get_decrypted_msg(self, data):
+		data = data.split("\r\n")
+		res = ""
+		for d in data:
+			res += self.factory.RSAkey.decrypt(d)
+		return res
+
+	def get_encrypted_msg(self, msg):
+		if self.encrypted_responses:
+			if len(msg) < self.client_key.size() / 8:
+				return self.client_key.encrypt(msg, "")[0]
+			else:
+				return self.client_key.encrypt(msg[:self.client_key.size() / 8], "")[0] + "\r\n" + \
+						self.get_encrypted_msg(msg[self.client_key.size() / 8:])
+		else:
+			return msg
+
+	def broadcast(self, msg, broadcast = BROADCAST_EVERYBODY, to = ""):
+		if broadcast == BROADCAST_EVERYBODY:
+			for c in self.factory.clients:
+				c.message(msg)
+		elif broadcast == BROADCAST_GAME:
+			for c in self.factory.clients:
+				if c.inGAME:
+					c.message(msg)
+		elif broadcast == BROADCAST_CHAT:
+			for c in self.factory.clients:
+				if c.inCHAT and c.channel == self.channel:
+					c.message(msg)
+		elif broadcast == BROADCAST_PM:
+			for c in self.factory.clients:
+				if c.name == to and c.inCHAT:
+					c.message(msg)
+		addText( msg, LOG_SERVER)
+
+	def broadcast_command(self, cmd):
+		for c in self.factory.clients:
+			if c.inCHAT and c.channel == self.channel:
+				c.send_command(cmd)
+
+	def message(self, msg):
+		addText(msg, LOG_SEND)
+		self.transport.write(msg + "\n")
+
+	def send_command(self, msg):
+		addText(msg, LOG_SEND)
+		self.transport.write(self.get_encrypted_msg(msg) + "\r\n\r\n")
+	
+
+
+class HTTPFrontEnd(resource.Resource):
+	isLeaf = True
+
+	template = "<html><head><title>pylanchatd 1.2 web-stats</title></head><body>%s<hr/><i>Copyright 2008, Bart Spaans</i></body></html>"
+
+	def __init__(self, users, channels):
+		self.users = users
+		self.channels = channels
+
+	def render_GET(self, request):
+		res = "<h1>pylanchatd 1.2 web-stats</h1><hr/>"
+		res += "<h2>Online users</h2>"
+		res += "<ul>" + "".join(["<li>%d - %s</li>" % (user.ID, user.name)\
+				for user in self.users.users])	+ "</ul>";
+
+		res += "<h2>Channels</h2>"
+		res += "<ul>" + "".join(["<li>%s [%d]</li>" % (chan[0], chan[1])\
+				for chan in self.channels]) + "</ul>";
+		return self.template % res
+
+
+def addText(text, log = LOG_INFO):
+	if log == LOG_INFO: 
+		identifier = "[INFO]"
+	elif log == LOG_RECV: 
+		identifier = "[RECV]"
+	elif log == LOG_SEND: 
+		identifier = "[SEND]"
+	elif log == LOG_ERR: 
+		identifier = "[ERR]"
+	elif log == LOG_CONN: 
+		identifier = "[CONN]"
+	elif log == LOG_SERVER:
+		identifier = "[SERVER]"
+
+	print identifier, remove_whitespace_at_end(text)
+
+def remove_whitespace_at_end(str):
+	if str[-1] == '\n' or str[-1] == '\n':
+		return remove_whitespace_at_end(str[:-1])
+	return str
+	
+		
+def startService():
+
+	p = Parser(
+		{
+			"port" : "2727",
+			"RSAkeysize" : "2048",
+			"maxclients" : "32",
+
+			"welcome_msg" : "conf/welcome",
+			"blockedip" : "conf/blocked.ip",
+			"blockednames" : "conf/blocked.names",
+
+			#todo
+			"auth" : "conf/auth",
+			"wordfilter" : "conf/wordfilter",
+
+			"channels" : "main",
+			"default_channel" : "main",
+
+			# todo
+			"msg_millisec_delay" : "50",
+			"msg_per_minute" : "10",
+		}, "=")
+
+	options = p.parse_file("server.conf")
+
+	if options == False:
+		return
+
+
+	port = int(options["port"])
+	welcome = options["welcome_msg"]
+
+
+	addText("%s version %s" % (APP_NAME, APP_VERSION), LOG_INFO)
+	addText("Attempting to start server at port %s\n" % port, LOG_INFO)
+	
+	factory = Factory()
+	factory.protocol = RPG
+	factory.clients = []
+
+	# Parse channel list
+	factory.channels = []
+	factory.default_channel = ""
+	channels = options["channels"].split(",")
+	for chan in channels:
+		if chan[0] == ' ':
+			chan = chan[1:]
+		addText("Adding channel %s" % chan, LOG_INFO)
+		factory.channels.append([chan, 0])
+		if chan == options["default_channel"]:
+			addText("Set default channel to %s." % chan, LOG_INFO)
+			factory.default_channel = chan
+
+	if factory.default_channel == "":
+		factory.default_channel = factory.channels[0][0]
+		addText("Set default channel to %s." % factory.default_channel, LOG_INFO)
+	
+	# Get welcome message
+	try:
+		addText("Getting welcome message from %s" % welcome)
+		f = open(welcome)
+		welcome = f.read()
+		f.close()
+	except:
+		addText("Error reading contents of welcome message in %s" % options["welcome"], LOG_ERR)
+		welcome = "Welcome to the server.\nRunning %s version %s." % (APP_NAME, APP_VERSION)
+
+	factory.welcome = welcome
+
+	# Get blocked names
+	try:
+		addText("Getting blocked usernames from %s" % options["blockednames"])
+		f = open(options["blockednames"])
+		blockednames = f.read().split("\n")
+		f.close()
+	except:
+		addText("Error reading contents of %s" % options["blockednames"], LOG_ERR)
+		blockednames = []
+
+	# Get blocked IPs
+	try:
+		addText("Getting blocked IP's from %s" % options["blockedip"])
+		f = open(options["blockedip"])
+		factory.blockedip = f.read().split("\n")
+		f.close()
+	except:
+		addText("Error reading blocked IP's from %s" % options["blockedip"], LOG_ERR)
+		factory.blockedip = []
+	
+
+
+
+	factory.users = Users()
+	factory.users.blockednames = blockednames
+	addText("Generating new %s bit RSA public key" % options["RSAkeysize"], LOG_INFO)
+	factory.RSAkey = RSA.generate(int(options["RSAkeysize"]), urandom)
+	factory.publickey = factory.RSAkey.publickey().__getstate__()
+	factory.challenge = "encrypt_this_string_if_you_want_to_use_RSA"
+	factory.challenge_answer = factory.RSAkey.encrypt(factory.challenge, "")[0]
+
+
+	addText("Listening for incoming connections...", LOG_INFO)
+	reactor.listenTCP(port, factory)
+
+	addText("Opening web server on port 8080...", LOG_INFO)
+	site = server.Site(HTTPFrontEnd(factory.users, factory.channels))
+	reactor.listenTCP(8080, site)
+
+	reactor.run()	
+
+startService()
+
