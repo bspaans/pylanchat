@@ -1,4 +1,4 @@
-===============================================================
+================================================================================
 
 	Python LAN Chat, Version 1.2
 
@@ -7,17 +7,14 @@
 	
 	Released under the GNU General Public License (GPL)
 	
-================================================================
+================================================================================
 
 This package contains:
 	
 	Python LAN Chat Server
 	Python LAN Chat Client
-	Python LAN Chat File Bot
-	Python LAN Chat Log Bot
-	Python LAN Chat Bot Skeleton
 
-================================================================
+================================================================================
 
 	VERSION LOG
 
@@ -35,12 +32,17 @@ This package contains:
 		* Crude emoticon support
 		* Dropped support for the GUI version of the server
 			
+================================================================================
 
-================================================================
+	TODO
+		+ Preferences tab needs labels..(yikes)
+		+ More options supported in the configuration files
+
+================================================================================
 
 FREQUENTLY ASKED QUESTIONS
 
-================================================================
+================================================================================
 
 Q: I just want to connect to a server and chat, what do I need?
 
@@ -84,3 +86,4 @@ Q: How do I setup Python LAN Chat on my own local network?
 	You can also check out some minimal stats by pointing 
 	your browser at	port 8080 of the server.
 
+================================================================================
